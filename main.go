@@ -128,12 +128,15 @@ import (
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/niuniu"            // 牛牛大作战
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/novel"             // 铅笔小说网搜索
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/nsfw"              // nsfw图片识别
+	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/ping"              // Ping检测
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/nwife"             // 本地老婆
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/omikuji"           // 浅草寺求签
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/poker"             // 抽扑克
+	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/ports_scan"        // 端口扫描
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/qqwife"            // 一群一天一夫一妻制群老婆
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/qzone"             // qq空间表白墙
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/realcugan"         // realcugan清晰术
+	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/remoteterminal"    // 远程终端管理
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/reborn"            // 投胎
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/robbery"           // 打劫群友的ATRI币
 	_ "github.com/FloatTech/ZeroBot-Plugin/plugin/rsshub"            // RSSHub订阅姬
