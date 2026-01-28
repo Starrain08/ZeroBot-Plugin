@@ -43,24 +43,26 @@ var (
 		"你曾经在精神病院向一个老汉学习了用手指夹住子弹的功夫\n然后, 子弹并没有射出, 你活了下来, 下一位",
 		"你曾经在精神病院向一个老汉学习过用手指夹住射出子弹的功夫, 在子弹射出的一瞬间, 你把他塞了回去\n你活了下来, 下一位",
 	}
+
+	rouletteHelpText = "- 创建轮盘赌\n- 加入轮盘赌\n- 开始轮盘赌\n- 开火\n- 终止轮盘赌"
 )
 
 func init() {
 	engine := control.Register("roulette", &ctrl.Options[*zero.Ctx]{
 		DisableOnDefault:  false,
 		Brief:             "轮盘赌",
-		Help:              RouletteHelpText,
+		Help:              rouletteHelpText,
 		PrivateDataFolder: "roulette",
 	})
 
 	filePath := engine.DataFolder() + "rate.json"
 	_ = os.Remove(filePath)
-	
+
 	if err := initializeDataPath(filePath); err != nil {
 		logrus.Errorf("[Roulette]初始化数据文件失败: %v", err)
 		return
 	}
-	
+
 	logrus.Infof("[Roulette]轮盘赌插件初始化成功，数据文件路径: %s", filePath)
 
 	checkSession := func(ctx *zero.Ctx) bool {
@@ -105,20 +107,20 @@ func init() {
 			userID := ctx.Event.UserID
 
 			// 验证输入参数
-		if err := ValidateAndSanitize(groupID); err != nil {
-			sendErrorMessage(ctx, "无效的群组ID: "+err.Error())
-			return
-		}
-		
-		if err := ValidateAndSanitize(userID); err != nil {
-			sendErrorMessage(ctx, "无效的用户ID: "+err.Error())
-			return
-		}
-		
-		if err := createNewSession(filePath, groupID, userID); err != nil {
-			sendErrorMessage(ctx, "创建游戏失败: "+err.Error())
-			return
-		}
+			if err := ValidateOnly(groupID); err != nil {
+				sendErrorMessage(ctx, "无效的群组ID: "+err.Error())
+				return
+			}
+
+			if err := ValidateOnly(userID); err != nil {
+				sendErrorMessage(ctx, "无效的用户ID: "+err.Error())
+				return
+			}
+
+			if err := createNewSession(filePath, groupID, userID); err != nil {
+				sendErrorMessage(ctx, "创建游戏失败: "+err.Error())
+				return
+			}
 
 			totalUsers := 1
 			maxUsers := int(MaxPlayers)
@@ -129,7 +131,7 @@ func init() {
 	engine.OnFullMatch("加入轮盘赌", zero.OnlyGroup, checkSession).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
 			defer recoverWithError(ctx, "加入轮盘赌")
-			
+
 			groupID := ctx.Event.GroupID
 			userID := ctx.Event.UserID
 
@@ -157,7 +159,7 @@ func init() {
 	engine.OnFullMatch("开始轮盘赌", zero.OnlyGroup, checkSession).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
 			defer recoverWithError(ctx, "开始轮盘赌")
-			
+
 			groupID := ctx.Event.GroupID
 			userID := ctx.Event.UserID
 
@@ -184,16 +186,16 @@ func init() {
 					return fmt.Errorf("启动游戏失败: %w", err)
 				}
 
-sendSuccessMessage(ctx, "游戏开始,"+RouletteRule+"现在请"+strconv.FormatInt(session.Users[0], 10)+"开火")
+				sendSuccessMessage(ctx, "游戏开始,"+RouletteRule+"现在请"+strconv.FormatInt(session.Users[0], 10)+"开火")
 				logrus.Infof("[Roulette]游戏开始，创建者: %d, 玩家数量: %d", userID, session.GetUserCount())
 				return nil
 			})
 
-gameCtx, cancel := context.WithTimeout(context.Background(), TimeoutDuration)
-	defer cancel()
+			gameCtx, cancel := context.WithTimeout(context.Background(), TimeoutDuration)
+			defer cancel()
 
-	warningTimer := time.NewTimer(WarningDuration)
-	timeoutTimer := time.NewTimer(TimeoutDuration)
+			warningTimer := time.NewTimer(WarningDuration)
+			timeoutTimer := time.NewTimer(TimeoutDuration)
 
 			defer warningTimer.Stop()
 			defer timeoutTimer.Stop()

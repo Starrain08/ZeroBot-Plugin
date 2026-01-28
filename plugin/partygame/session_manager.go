@@ -1,40 +1,40 @@
 package partygame
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // SessionManager 管理游戏会话，提供缓存和批量操作功能
 type SessionManager struct {
-	sessions      map[int64]Session
-	sessionLock   ReadWriteLock
-	dataPath      string
-	cacheExpiry   time.Duration
-	lastCleanup   time.Time
+	sessions     map[int64]Session
+	sessionLock  ReadWriteLock
+	dataPath     string
+	cacheExpiry  time.Duration
+	lastCleanup  time.Time
 	asyncLocker  *AsyncLocker
-	taskExecutor  *ConcurrentTask
+	taskExecutor *ConcurrentTask
 }
 
 // NewSessionManager 创建新的会话管理器
 func NewSessionManager(dataPath string) *SessionManager {
 	sm := &SessionManager{
-		sessions:      make(map[int64]Session),
-		dataPath:      dataPath,
-		cacheExpiry:   5 * time.Minute,
-		lastCleanup:   time.Now(),
+		sessions:     make(map[int64]Session),
+		dataPath:     dataPath,
+		cacheExpiry:  5 * time.Minute,
+		lastCleanup:  time.Now(),
 		asyncLocker:  NewAsyncLocker(30 * time.Second),
 		taskExecutor: NewConcurrentTask(5),
 	}
-	
+
 	// 启动监控
 	go sm.StartMonitoring(1 * time.Minute)
-	
+
 	return sm
 }
 
@@ -229,7 +229,7 @@ func writeAllSessionsWithCache(path string, sessions []Session, cache *SessionMa
 func atomicWriteFile(path string, data []byte) error {
 	// 创建临时文件
 	tempPath := path + ".tmp"
-	
+
 	// 写入临时文件
 	if err := os.WriteFile(tempPath, data, FilePermission); err != nil {
 		return err
@@ -237,15 +237,6 @@ func atomicWriteFile(path string, data []byte) error {
 
 	// 原子性重命名
 	return os.Rename(tempPath, path)
-}
-
-// 异步保存会话
-func (sm *SessionManager) AsyncSave(session Session) {
-	go func() {
-		if err := sm.UpdateSession(session); err != nil {
-			logrus.Errorf("[SessionManager]异步保存会话失败: %v", err)
-		}
-	}()
 }
 
 // 会话状态监控
@@ -275,7 +266,7 @@ func (sm *SessionManager) MonitorSessions() {
 		}
 	}
 
-	logrus.Infof("[SessionManager]会话状态统计: 总数=%d, 活跃=%d, 过期=%d", 
+	logrus.Infof("[SessionManager]会话状态统计: 总数=%d, 活跃=%d, 过期=%d",
 		totalCount, activeCount, expiredCount)
 }
 
@@ -308,7 +299,7 @@ func (sp *SessionPool) GetSessionFromPool(groupID int64) (Session, error) {
 		// 池为空，从管理器获取
 		return sp.manager.GetSession(groupID)
 	}
-	
+
 	// 再次尝试从管理器获取
 	return sp.manager.GetSession(groupID)
 }
@@ -329,10 +320,10 @@ func (sm *SessionManager) GetStats() SessionStats {
 	defer sm.sessionLock.RUnlock()
 
 	stats := SessionStats{
-		TotalSessions:    len(sm.sessions),
-		ActiveSessions:   0,
-		ExpiredSessions:  0,
-		TotalPlayers:     0,
+		TotalSessions:   len(sm.sessions),
+		ActiveSessions:  0,
+		ExpiredSessions: 0,
+		TotalPlayers:    0,
 	}
 
 	for _, session := range sm.sessions {
@@ -361,7 +352,7 @@ type SessionStats struct {
 	TotalSessions   int `json:"total_sessions"`
 	ActiveSessions  int `json:"active_sessions"`
 	ExpiredSessions int `json:"expired_sessions"`
-	TotalPlayers   int `json:"total_players"`
+	TotalPlayers    int `json:"total_players"`
 }
 
 // 导出统计信息
@@ -388,7 +379,7 @@ func NewFileCache(ttl time.Duration) *FileCache {
 		cache: make(map[string][]byte),
 		ttl:   ttl,
 	}
-	
+
 	// 启动缓存清理
 	go fc.startCleanup()
 	return fc
@@ -430,7 +421,7 @@ func (fc *FileCache) startCleanup() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-	 fc.cleanup()
+		fc.cleanup()
 	}
 }
 
@@ -438,10 +429,10 @@ func (fc *FileCache) startCleanup() {
 func (fc *FileCache) cleanup() {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
-	
+
 	// 简单的清理策略：清空所有缓存
 	// 实际应用中可以实现更复杂的LRU等策略
 	fc.cache = make(map[string][]byte)
-	
+
 	logrus.Debugf("[FileCache]缓存已清理")
 }

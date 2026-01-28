@@ -10,7 +10,6 @@ import (
 	"github.com/FloatTech/zbputils/control"
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
-	"github.com/wdvxdr1123/ZeroBot/message"
 )
 
 type tdata struct {
@@ -23,16 +22,17 @@ type tdata struct {
 }
 
 var (
-	action      tdata
-	question    tdata
-	punishMap   = make(map[string]string)
-	punishMutex sync.RWMutex
+	action              tdata
+	question            tdata
+	punishMap           = make(map[string]string)
+	punishMutex         sync.RWMutex
+	truthOrDareHelpText = "真心话大冒险\n- 来点乐子[@xxx]\n- 饶恕[@xxx]\n- 惩罚[@xxx]\n- 反省[@xxx]"
 )
 
 func init() {
 	engine := control.Register("truthordare", &ctrl.Options[*zero.Ctx]{
 		DisableOnDefault: false,
-		Help:             TruthOrDareHelpText,
+		Help:             truthOrDareHelpText,
 		PublicDataFolder: "Truthordare",
 	})
 
@@ -63,23 +63,22 @@ func init() {
 
 	engine.OnRegex(`^(真心话大冒险|来点刺激|来点乐子)`).Handle(func(ctx *zero.Ctx) {
 		defer recoverWithError(ctx, "真心话大冒险触发")
-		
+
 		// 验证输入
 		if err := validateStringInput(ctx.Event.Message.ExtractPlainText(), 3, 20, "触发命令"); err != nil {
 			sendErrorMessage(ctx, "无效的命令格式")
 			return
 		}
-		
+
 		targetUserID := parseTargetUserID(ctx)
-		
-		// 验证目标用户ID
-		if err := ValidateAndSanitize(targetUserID); err != nil {
+
+		if err := ValidateOnly(targetUserID); err != nil {
 			sendErrorMessage(ctx, "无效的目标用户ID")
 			return
 		}
-		
+
 		key := fmt.Sprintf("%v-%v", ctx.Event.GroupID, targetUserID)
-		
+
 		punishMutex.RLock()
 		if v, exists := punishMap[key]; exists {
 			punishMutex.RUnlock()
@@ -87,7 +86,7 @@ func init() {
 			return
 		}
 		punishMutex.RUnlock()
-		
+
 		ctx.Event.UserID = targetUserID
 		logrus.Infof("[TruthOrDare]用户 %d 触发真心话大冒险", targetUserID)
 		getTruthOrDare(ctx)
@@ -96,7 +95,7 @@ func init() {
 	engine.OnRegex(`^(饶恕|阿门|释放|原谅|赦免)`, zero.AdminPermission, zero.OnlyGroup).Handle(func(ctx *zero.Ctx) {
 		targetUserID := parseTargetUserID(ctx)
 		key := fmt.Sprintf("%v-%v", ctx.Event.GroupID, targetUserID)
-		
+
 		punishMutex.Lock()
 		delete(punishMap, key)
 		punishMutex.Unlock()
@@ -112,20 +111,20 @@ func init() {
 	engine.OnRegex(`^(反省|检查罪行)`, zero.OnlyGroup).Handle(func(ctx *zero.Ctx) {
 		targetUserID := parseTargetUserID(ctx)
 		key := fmt.Sprintf("%v-%v", ctx.Event.GroupID, targetUserID)
-		
+
 		punishMutex.RLock()
 		if v, exists := punishMap[key]; exists {
 			sendSuccessMessageWithAt(ctx, targetUserID, "你是罪人, 赎罪方式是"+v)
 		}
 		punishMutex.RUnlock()
-		
+
 		role := ctx.GetGroupMemberInfo(ctx.Event.GroupID, targetUserID, true).Get("role").String()
 		ctx.Event.UserID = targetUserID
-		
+
 		if zero.SuperUserPermission(ctx) || role != "member" {
 			sendSuccessMessageWithAt(ctx, targetUserID, "你是上帝")
 		}
-		
+
 		if !zero.SuperUserPermission(ctx) && role == "member" {
 			punishMutex.RLock()
 			if _, exists := punishMap[key]; !exists {
@@ -168,15 +167,15 @@ func getActionOrQuestion() string {
 
 func getTruthOrDare(ctx *zero.Ctx) {
 	defer recoverWithError(ctx, "getTruthOrDare")
-	
+
 	next, cancel := zero.NewFutureEvent("message", 999, false, ctx.CheckSession(), zero.FullMatchRule("真心话", "大冒险")).Repeat()
 	defer cancel()
-	
+
 	key := fmt.Sprintf("%v-%v", ctx.Event.GroupID, ctx.Event.UserID)
 	sendSuccessMessageWithAt(ctx, ctx.Event.UserID, "你将受到严峻的惩罚, 请选择惩罚, 真心话还是大冒险?")
-	
+
 	timeout := time.After(ResponseTimeout)
-	
+
 	for {
 		select {
 		case <-timeout:
@@ -186,25 +185,25 @@ func getTruthOrDare(ctx *zero.Ctx) {
 			}
 			sendSuccessMessage(ctx, "时间太久啦！"+botName+"帮你选择")
 			punishment := getActionOrQuestion()
-			
+
 			punishMutex.Lock()
 			punishMap[key] = punishment
 			punishMutex.Unlock()
-			
+
 			sendSuccessMessageWithAt(ctx, ctx.Event.UserID, "恭喜你获得\""+punishment+"\"的惩罚")
 			logrus.Infof("[TruthOrDare]用户 %d 自动选择惩罚: %s", ctx.Event.UserID, punishment)
 			return
-			
+
 		case c := <-next:
 			msg := c.Event.Message.ExtractPlainText()
-			
+
 			if err := validateStringInput(msg, 2, 10, "惩罚类型"); err != nil {
 				logrus.Warnf("[TruthOrDare]用户 %d 输入无效: %v", ctx.Event.UserID, err)
 				continue
 			}
-			
+
 			var punishment string
-			
+
 			switch msg {
 			case "真心话":
 				punishment = getQuestion()
@@ -217,7 +216,7 @@ func getTruthOrDare(ctx *zero.Ctx) {
 			punishMutex.Lock()
 			punishMap[key] = punishment
 			punishMutex.Unlock()
-			
+
 			sendSuccessMessageWithAt(ctx, ctx.Event.UserID, "恭喜你获得\""+punishment+"\"的惩罚")
 			logrus.Infof("[TruthOrDare]用户 %d 选择 %s: %s", ctx.Event.UserID, msg, punishment)
 			return

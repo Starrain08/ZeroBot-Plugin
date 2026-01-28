@@ -7,20 +7,19 @@ import (
 
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
-	"github.com/wdvxdr1123/ZeroBot/message"
 )
 
 // 自定义错误类型
 var (
-	ErrSessionNotFound    = errors.New("游戏会话未找到")
-	ErrPlayerNotFound     = errors.New("玩家未找到")
-	ErrInvalidOperation   = errors.New("无效操作")
-	ErrSessionExpired     = errors.New("游戏会话已过期")
+	ErrSessionNotFound     = errors.New("游戏会话未找到")
+	ErrPlayerNotFound      = errors.New("玩家未找到")
+	ErrInvalidOperation    = errors.New("无效操作")
+	ErrSessionExpired      = errors.New("游戏会话已过期")
 	ErrInsufficientPlayers = errors.New("玩家数量不足")
-	ErrPlayerInSession    = errors.New("玩家已在游戏中")
+	ErrPlayerInSession     = errors.New("玩家已在游戏中")
 	ErrMaxPlayersReached   = errors.New("达到最大玩家数量")
-	ErrNotYourTurn        = errors.New("尚未轮到你")
-	ErrCartridgeEmpty     = errors.New("弹夹已空")
+	ErrNotYourTurn         = errors.New("尚未轮到你")
+	ErrCartridgeEmpty      = errors.New("弹夹已空")
 )
 
 // 错误处理器接口
@@ -33,7 +32,7 @@ type DefaultErrorHandler struct{}
 
 func (h *DefaultErrorHandler) HandleError(ctx *zero.Ctx, err error) {
 	logrus.Errorf("[PartyGame]错误处理: %v", err)
-	
+
 	// 根据错误类型返回不同的用户消息
 	switch {
 	case errors.Is(err, ErrSessionNotFound):
@@ -85,15 +84,15 @@ func validateSession(ctx *zero.Ctx, session Session) error {
 	if session.GroupID == 0 {
 		return ErrSessionNotFound
 	}
-	
+
 	if session.IsExpired() {
 		return ErrSessionExpired
 	}
-	
+
 	if len(session.Users) < 2 {
 		return ErrInsufficientPlayers
 	}
-	
+
 	return nil
 }
 
@@ -102,11 +101,11 @@ func validatePlayerAction(ctx *zero.Ctx, session Session, userID int64) error {
 	if !session.IsPlayerInSession(userID) {
 		return ErrPlayerNotFound
 	}
-	
+
 	if !session.IsPlayerTurn(userID) {
 		return ErrNotYourTurn
 	}
-	
+
 	return nil
 }
 
@@ -115,11 +114,11 @@ func validatePlayerJoin(session Session, userID int64) error {
 	if session.IsPlayerInSession(userID) {
 		return ErrPlayerInSession
 	}
-	
+
 	if int(session.Max) <= session.GetUserCount() {
 		return ErrMaxPlayersReached
 	}
-	
+
 	return nil
 }
 
@@ -169,26 +168,23 @@ func validateNumberRange(value, min, max int64, fieldName string) error {
 	return nil
 }
 
-// 错误消息国际化支持
 type ErrorMessage struct {
 	Chinese string
 	English string
 }
 
-// 错误消息映射
 var errorMessages = map[string]ErrorMessage{
-	ErrSessionNotFound.Chinese:    {Chinese: "游戏会话未找到", English: "Game session not found"},
-	ErrPlayerNotFound.Chinese:     {Chinese: "玩家未找到", English: "Player not found"},
-	ErrInvalidOperation.Chinese:   {Chinese: "无效操作", English: "Invalid operation"},
-	ErrSessionExpired.Chinese:     {Chinese: "游戏会话已过期", English: "Session expired"},
-	ErrInsufficientPlayers.Chinese: {Chinese: "玩家数量不足", English: "Insufficient players"},
-	ErrPlayerInSession.Chinese:    {Chinese: "玩家已在游戏中", English: "Player already in session"},
-	ErrMaxPlayersReached.Chinese:  {Chinese: "达到最大玩家数量", English: "Max players reached"},
-	ErrNotYourTurn.Chinese:        {Chinese: "尚未轮到你", English: "Not your turn"},
-	ErrCartridgeEmpty.Chinese:     {Chinese: "弹夹已空", English: "Cartridge empty"},
+	ErrSessionNotFound.Error():     {Chinese: "游戏会话未找到", English: "Game session not found"},
+	ErrPlayerNotFound.Error():      {Chinese: "玩家未找到", English: "Player not found"},
+	ErrInvalidOperation.Error():    {Chinese: "无效操作", English: "Invalid operation"},
+	ErrSessionExpired.Error():      {Chinese: "游戏会话已过期", English: "Session expired"},
+	ErrInsufficientPlayers.Error(): {Chinese: "玩家数量不足", English: "Insufficient players"},
+	ErrPlayerInSession.Error():     {Chinese: "玩家已在游戏中", English: "Player already in session"},
+	ErrMaxPlayersReached.Error():   {Chinese: "达到最大玩家数量", English: "Max players reached"},
+	ErrNotYourTurn.Error():         {Chinese: "尚未轮到你", English: "Not your turn"},
+	ErrCartridgeEmpty.Error():      {Chinese: "弹夹已空", English: "Cartridge empty"},
 }
 
-// 获取本地化的错误消息
 func getLocalizedErrorMessage(err error, language string) string {
 	errStr := err.Error()
 	if msg, exists := errorMessages[errStr]; exists {
@@ -205,12 +201,12 @@ func handleBatchErrors(ctx *zero.Ctx, errors []error) {
 	if len(errors) == 0 {
 		return
 	}
-	
+
 	errorMsgs := make([]string, len(errors))
 	for i, err := range errors {
 		errorMsgs[i] = err.Error()
 	}
-	
+
 	logrus.Errorf("[PartyGame]Batch errors: %v", errorMsgs)
 	sendErrorMessage(ctx, fmt.Sprintf("发生 %d 个错误，请检查操作", len(errors)))
 }

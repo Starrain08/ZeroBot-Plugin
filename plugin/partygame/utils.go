@@ -4,23 +4,13 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
-)
-
-// 常量定义
-const (
-	MaxPlayers         = 3
-	MaxCartridges      = 6
-	TimeoutDuration    = 120 * time.Second
-	WarningDuration    = 105 * time.Second
-	ResponseTimeout   = 20 * time.Second
-	SessionExpireTime  = 300 // 5分钟
-	RouletteHelpText   = "- 创建轮盘赌\n- 加入轮盘赌\n- 开始轮盘赌\n- 开火\n- 终止轮盘赌"
-	TruthOrDareHelpText = "真心话大冒险\n- 来点乐子[@xxx]\n- 饶恕[@xxx]\n- 惩罚[@xxx]\n- 反省[@xxx]"
 )
 
 // 全局随机数生成器
@@ -47,7 +37,7 @@ func sendErrorMessage(ctx *zero.Ctx, msg string) {
 		logrus.Errorf("[PartyGame]错误消息验证失败: %v", err)
 		msg = "系统错误"
 	}
-	
+
 	ctx.SendChain(message.Text(msg))
 }
 
@@ -58,24 +48,22 @@ func sendSuccessMessage(ctx *zero.Ctx, msg string) {
 		logrus.Errorf("[PartyGame]成功消息验证失败: %v", err)
 		msg = "操作成功"
 	}
-	
+
 	ctx.SendChain(message.Text(msg))
 }
 
 // 发送带at的成功消息
 func sendSuccessMessageWithAt(ctx *zero.Ctx, targetUserID int64, msg string) {
-	// 验证目标用户ID
-	if err := ValidateAndSanitize(targetUserID); err != nil {
+	if err := ValidateOnly(targetUserID); err != nil {
 		logrus.Errorf("[PartyGame]目标用户ID验证失败: %v", err)
 		targetUserID = ctx.Event.UserID
 	}
-	
-	// 验证消息内容
+
 	if err := validateStringInput(msg, 1, MaxMessageLength, "SuccessMessageWithAt"); err != nil {
 		logrus.Errorf("[PartyGame]带at的成功消息验证失败: %v", err)
 		msg = "操作成功"
 	}
-	
+
 	ctx.SendChain(message.At(targetUserID), message.Text(msg))
 }
 
@@ -90,14 +78,13 @@ func randomChoice[T any](items []T) T {
 		var zeroValue T
 		return zeroValue
 	}
-	
-	// 验证输入数组
-	if err := ValidateAndSanitize(items); err != nil {
+
+	if err := ValidateOnly(items); err != nil {
 		logrus.Warnf("[PartyGame]随机选择输入验证失败: %v", err)
 		var zeroValue T
 		return zeroValue
 	}
-	
+
 	return items[randSource.Intn(len(items))]
 }
 
@@ -121,10 +108,10 @@ func unique[T comparable](items []T) []T {
 	if len(items) == 0 {
 		return items
 	}
-	
+
 	seen := make(map[T]bool)
 	result := make([]T, 0, len(items))
-	
+
 	for _, item := range items {
 		if !seen[item] {
 			seen[item] = true
@@ -137,11 +124,11 @@ func unique[T comparable](items []T) []T {
 // 安全的字符串拼接
 func safeStringConcat(parts ...string) string {
 	var result strings.Builder
-	
+
 	for _, part := range parts {
 		result.WriteString(part)
 	}
-	
+
 	return result.String()
 }
 
@@ -149,7 +136,7 @@ func safeStringConcat(parts ...string) string {
 func withTimeout[T any](fn func() T, timeout time.Duration) (T, error) {
 	done := make(chan T, 1)
 	errChan := make(chan error, 1)
-	
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -159,7 +146,7 @@ func withTimeout[T any](fn func() T, timeout time.Duration) (T, error) {
 		result := fn()
 		done <- result
 	}()
-	
+
 	select {
 	case result := <-done:
 		return result, nil

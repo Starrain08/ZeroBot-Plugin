@@ -1,10 +1,8 @@
 package partygame
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -88,9 +86,9 @@ func (sv *SessionValidator) Validate() error {
 
 // UserValidator 用户验证器
 type UserValidator struct {
-	UserID  int64
+	UserID   int64
 	Nickname string
-	GroupID int64
+	GroupID  int64
 }
 
 func (uv *UserValidator) Validate() error {
@@ -155,10 +153,10 @@ func (mv *MessageValidator) Validate() error {
 
 // GameConfigValidator 游戏配置验证器
 type GameConfigValidator struct {
-	MaxPlayers    int64
-	Timeout       time.Duration
-	MaxRetries    int
-	EnableLog     bool
+	MaxPlayers int64
+	Timeout    time.Duration
+	MaxRetries int
+	EnableLog  bool
 }
 
 func (gcv *GameConfigValidator) Validate() error {
@@ -328,7 +326,7 @@ func ValidateJSON(data []byte, schema interface{}) error {
 // ValidatePermission 验证权限
 func ValidatePermission(role string, requiredRole string) error {
 	validRoles := []string{RoleCreator, RolePlayer, RoleAdmin, RoleSpectator}
-	
+
 	if err := validateInput(role, validRoles, "Role"); err != nil {
 		return err
 	}
@@ -357,7 +355,7 @@ func ValidatePermission(role string, requiredRole string) error {
 // ValidateGameState 验证游戏状态
 func ValidateGameState(state string) error {
 	validStates := []string{GameStateCreated, GameStateActive, GameStateFinished, GameStateExpired}
-	
+
 	return validateInput(state, validStates, "GameState")
 }
 
@@ -470,20 +468,26 @@ func ValidateAndSanitize(input interface{}) (interface{}, error) {
 	}
 }
 
+// ValidateOnly 验证数据但不返回清理后的值（简化版本）
+func ValidateOnly(input interface{}) error {
+	_, err := ValidateAndSanitize(input)
+	return err
+}
+
 // BatchValidate 批量验证
 func BatchValidate(validators ...Validator) error {
 	var errors []error
-	
+
 	for _, validator := range validators {
 		if err := validator.Validate(); err != nil {
 			errors = append(errors, err)
 		}
 	}
-	
+
 	if len(errors) > 0 {
 		return fmt.Errorf("batch validation failed with %d errors: %v", len(errors), errors)
 	}
-	
+
 	return nil
 }
 
@@ -492,7 +496,7 @@ func BatchValidate(validators ...Validator) error {
 func SanitizeInput(input string) string {
 	// 去除首尾空格
 	input = strings.TrimSpace(input)
-	
+
 	// 移除控制字符
 	input = strings.Map(func(r rune) rune {
 		if r < 32 || r > 126 {
@@ -500,10 +504,10 @@ func SanitizeInput(input string) string {
 		}
 		return r
 	}, input)
-	
+
 	// 转义HTML特殊字符（如果需要）
 	// 这里可以添加HTML转义逻辑
-	
+
 	return input
 }
 

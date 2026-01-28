@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -39,7 +41,7 @@ func initializeDataPath(path string) error {
 
 	// 初始化文件缓存
 	fileCache = NewFileCache(5 * time.Minute)
-	
+
 	// 初始化会话管理器
 	sessionManager = NewSessionManager(path)
 
@@ -163,11 +165,11 @@ func findSessionByGroupID(path string, groupID int64) (Session, error) {
 
 func createNewSession(path string, groupID, creatorID int64) error {
 	// 验证输入参数
-	if err := ValidateAndSanitize(groupID); err != nil {
+	if err := ValidateOnly(groupID); err != nil {
 		return fmt.Errorf("无效的群组ID: %w", err)
 	}
-	
-	if err := ValidateAndSanitize(creatorID); err != nil {
+
+	if err := ValidateOnly(creatorID); err != nil {
 		return fmt.Errorf("无效的创建者ID: %w", err)
 	}
 
@@ -181,7 +183,7 @@ func createNewSession(path string, groupID, creatorID int64) error {
 		ExpireTime: SessionExpireTime,
 		CreateTime: time.Now().Unix(),
 	}
-	
+
 	// 验证会话数据
 	if err := (&SessionValidator{Session: session}).Validate(); err != nil {
 		return fmt.Errorf("会话数据验证失败: %w", err)
@@ -240,8 +242,7 @@ func (s Session) Validate() error {
 }
 
 func (s *Session) AddPlayer(userID int64) error {
-	// 验证用户ID
-	if err := ValidateAndSanitize(userID); err != nil {
+	if err := ValidateOnly(userID); err != nil {
 		return fmt.Errorf("无效的用户ID: %w", err)
 	}
 
@@ -254,12 +255,12 @@ func (s *Session) AddPlayer(userID int64) error {
 	}
 
 	s.Users = append(s.Users, userID)
-	
+
 	// 验证会话数据
 	if err := s.Validate(); err != nil {
 		return fmt.Errorf("会话数据验证失败: %w", err)
 	}
-	
+
 	return saveSession(dataPath, *s)
 }
 
@@ -305,13 +306,13 @@ func (s *Session) ShufflePlayersOrder() error {
 	})
 
 	s.Users = players
-	
+
 	// 异步保存
 	if sessionManager != nil {
 		sessionManager.AsyncSave(*s)
 		return nil
 	}
-	
+
 	return saveSession(dataPath, *s)
 }
 
@@ -325,19 +326,19 @@ func generateRouletteCartridges() []int {
 	for i := BulletCount; i < CartridgeCapacity; i++ {
 		cartridges[i] = 0
 	}
-	
+
 	// 打乱顺序
 	randSource.Shuffle(CartridgeCapacity, func(i, j int) {
 		cartridges[i], cartridges[j] = cartridges[j], cartridges[i]
 	})
-	
+
 	// 验证生成的弹夹
 	if err := ValidateCartridges(cartridges); err != nil {
 		logrus.Errorf("[PartyGame]弹夹生成失败: %v", err)
 		// 返回默认配置
 		return []int{1, 0, 0, 0, 0, 0}
 	}
-	
+
 	return cartridges
 }
 
@@ -377,6 +378,6 @@ func (s *Session) Fire() (bool, error) {
 		sessionManager.AsyncSave(*s)
 		return false, nil
 	}
-	
+
 	return false, saveSession(dataPath, *s)
 }

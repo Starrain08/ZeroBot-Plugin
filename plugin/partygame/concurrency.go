@@ -5,15 +5,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"context"
+
+	"github.com/sirupsen/logrus"
 )
 
 // AsyncLocker 异步锁管理器
 type AsyncLocker struct {
-	locks    map[string]*sync.Mutex
-	mu       sync.RWMutex
-	timeout  time.Duration
-	cleanup  *time.Ticker
+	locks   map[string]*sync.Mutex
+	mu      sync.RWMutex
+	timeout time.Duration
+	cleanup *time.Ticker
 }
 
 // NewAsyncLocker 创建新的异步锁管理器
@@ -23,7 +24,7 @@ func NewAsyncLocker(timeout time.Duration) *AsyncLocker {
 		timeout: timeout,
 		cleanup: time.NewTicker(5 * time.Minute),
 	}
-	
+
 	go al.cleanupExpiredLocks()
 	return al
 }
@@ -32,11 +33,11 @@ func NewAsyncLocker(timeout time.Duration) *AsyncLocker {
 func (al *AsyncLocker) TryLock(key string) bool {
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	
-	if lock, exists := al.locks[key]; exists {
+
+	if _, exists := al.locks[key]; exists {
 		return false
 	}
-	
+
 	lock := &sync.Mutex{}
 	lock.Lock()
 	al.locks[key] = lock
@@ -47,7 +48,7 @@ func (al *AsyncLocker) TryLock(key string) bool {
 func (al *AsyncLocker) Unlock(key string) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	
+
 	if lock, exists := al.locks[key]; exists {
 		lock.Unlock()
 		delete(al.locks, key)
@@ -64,14 +65,14 @@ func (al *AsyncLocker) cleanupExpiredLocks() {
 func (al *AsyncLocker) cleanupExpired() {
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	
+
 	// 这里可以添加更复杂的过期逻辑
 	// 目前简单清理所有锁
 	for key, lock := range al.locks {
 		lock.Unlock()
 		delete(al.locks, key)
 	}
-	
+
 	logrus.Debugf("[AsyncLocker]清理过期锁，剩余: %d", len(al.locks))
 }
 
@@ -88,7 +89,7 @@ func NewConcurrentTask(maxWorkers int) *ConcurrentTask {
 		maxWorkers: maxWorkers,
 		taskQueue:  make(chan func(), 100),
 	}
-	
+
 	ct.startWorkers()
 	return ct
 }
@@ -109,7 +110,7 @@ func (ct *ConcurrentTask) startWorkers() {
 // worker 工作线程
 func (ct *ConcurrentTask) worker() {
 	defer ct.wg.Done()
-	
+
 	for task := range ct.taskQueue {
 		func() {
 			defer func() {
@@ -128,7 +129,6 @@ func (ct *ConcurrentTask) Wait() {
 	ct.wg.Wait()
 }
 
-// ReadWriteLock 读写锁优化
 type ReadWriteLock struct {
 	readers int
 	writer  bool
@@ -136,7 +136,6 @@ type ReadWriteLock struct {
 	writeMu sync.Mutex
 }
 
-// LockRead 获取读锁
 func (rw *ReadWriteLock) LockRead() {
 	rw.readMu.Lock()
 	if rw.readers == 0 {
@@ -146,7 +145,6 @@ func (rw *ReadWriteLock) LockRead() {
 	rw.readMu.Unlock()
 }
 
-// UnlockRead 释放读锁
 func (rw *ReadWriteLock) UnlockRead() {
 	rw.readMu.Lock()
 	rw.readers--
@@ -156,17 +154,38 @@ func (rw *ReadWriteLock) UnlockRead() {
 	rw.readMu.Unlock()
 }
 
-// LockWrite 获取写锁
 func (rw *ReadWriteLock) LockWrite() {
 	rw.writeMu.Lock()
 }
 
-// UnlockWrite 释放写锁
 func (rw *ReadWriteLock) UnlockWrite() {
 	rw.writeMu.Unlock()
 }
 
-// SpinLock 自旋锁实现
+func (rw *ReadWriteLock) BeginRead() {
+	rw.LockRead()
+}
+
+func (rw *ReadWriteLock) EndRead() {
+	rw.UnlockRead()
+}
+
+func (rw *ReadWriteLock) BeginWrite() {
+	rw.LockWrite()
+}
+
+func (rw *ReadWriteLock) EndWrite() {
+	rw.UnlockWrite()
+}
+
+func (rw *ReadWriteLock) RLock() {
+	rw.LockRead()
+}
+
+func (rw *ReadWriteLock) RUnlock() {
+	rw.UnlockRead()
+}
+
 type SpinLock struct {
 	state int32
 }
@@ -208,7 +227,7 @@ func (om *OptimizedMutex) Lock() {
 		om.initialized = true
 		om.mu.Unlock()
 	}
-	
+
 	// 短时间竞争使用自旋锁
 	if om.useSpinLock {
 		om.spinLock.Lock()
@@ -284,12 +303,12 @@ func NewPool(size int, factory func() interface{}) *Pool {
 		items:   make(chan interface{}, size),
 		factory: factory,
 	}
-	
+
 	// 预填充池
 	for i := 0; i < size; i++ {
 		pool.items <- pool.factory()
 	}
-	
+
 	return pool
 }
 
@@ -335,7 +354,7 @@ func NewOptimizedCondition() *OptimizedCondition {
 func (oc *OptimizedCondition) Wait() {
 	oc.mu.Lock()
 	oc.mu.Unlock()
-	
+
 	<-oc.notify
 }
 
@@ -355,14 +374,14 @@ func (oc *OptimizedCondition) Broadcast() {
 
 // 超时锁
 type TimeoutLock struct {
-.mu    sync.Mutex
-.owner string
+	mu    sync.Mutex
+	owner string
 }
 
 // TryLockWithTimeout 尝试获取带超时的锁
 func (tl *TimeoutLock) TryLockWithTimeout(owner string, timeout time.Duration) bool {
 	start := time.Now()
-	
+
 	for {
 		tl.mu.Lock()
 		if tl.owner == "" {
@@ -371,11 +390,11 @@ func (tl *TimeoutLock) TryLockWithTimeout(owner string, timeout time.Duration) b
 			return true
 		}
 		tl.mu.Unlock()
-		
+
 		if time.Since(start) > timeout {
 			return false
 		}
-		
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -384,7 +403,7 @@ func (tl *TimeoutLock) TryLockWithTimeout(owner string, timeout time.Duration) b
 func (tl *TimeoutLock) Unlock(owner string) bool {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
-	
+
 	if tl.owner == owner {
 		tl.owner = ""
 		return true
@@ -414,7 +433,7 @@ func NewDistributedLock(key string, ttl time.Duration) *DistributedLock {
 func (dl *DistributedLock) TryLock(owner string) bool {
 	// 简化的分布式锁实现
 	// 实际应用中应该使用Redis等外部存储
-	
+
 	select {
 	case dl.lockChan <- struct{}{}:
 		dl.owner = owner
