@@ -12,9 +12,9 @@ import (
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
 	"github.com/FloatTech/zbputils/ctxext"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -29,10 +29,10 @@ const (
 )
 
 func init() {
-	control.AutoRegister(&ctrl.Options[*zero.Ctx]{
+	engine := control.AutoRegister(&ctrl.Options[*zero.Ctx]{
 		DisableOnDefault: false,
 		Brief:            "端口扫描",
-		Help:             "端口扫描\n" +
+		Help: "端口扫描\n" +
 			"- /ports_scan <地址> - 扫描TCP常用端口\n" +
 			"- /ports_scan <地址> -u - 扫描UDP常用端口\n" +
 			"- /ports_scan <地址> -a - 扫描TCP和UDP常用端口\n" +
@@ -45,13 +45,11 @@ func init() {
 			"UDP常用端口: 53,67,68,69,123,161,162,514,520,4500,5000,5353,11211",
 	}).ApplySingle(ctxext.DefaultSingle)
 
-	engine, _ := control.Lookup("ports_scan")
-
 	engine.OnRegex(`^/ports_scan\s+(.+?)(?:\s+-u)?(?:\s+-a)?(?:\s+-p\s+(\d+(?:,\d+)*))?(?:\s+-r\s+(\d+)-(\d+))?(?:\s+-t\s+(\d+))?(?:\s+-u)?(?:\s+-a)?$`).SetBlock(true).Limit(ctxext.LimitByUser).
 		Handle(func(ctx *zero.Ctx) {
 			matches := ctx.State["regex_matched"].([]string)
 			target := strings.TrimSpace(matches[1])
-			
+
 			if target == "" {
 				ctx.SendChain(message.Text("错误: 请指定要扫描的地址\n使用 /ports_scan help 查看帮助"))
 				return
@@ -110,7 +108,7 @@ func init() {
 			}
 
 			ctx.SendChain(message.Text("正在扫描 ", target, " 的 ", len(ports), " 个端口，超时 ", timeout, " 秒..."))
-			
+
 			results := scanPorts(target, ports, time.Duration(timeout)*time.Second, scanTCP, scanUDP)
 			sendScanResults(ctx, target, results)
 		})
@@ -160,13 +158,13 @@ func getCommonUDPPorts() []int {
 
 func scanPorts(target string, ports []int, timeout time.Duration, scanTCP, scanUDP bool) []PortResult {
 	logrus.Infoln("[ports_scan] 扫描:", target, "端口数量:", len(ports), "TCP:", scanTCP, "UDP:", scanUDP)
-	
+
 	results := make([]PortResult, 0, len(ports)*2)
 	resultsMutex := &sync.Mutex{}
-	
+
 	semaphore := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
-	
+
 	for _, port := range ports {
 		if scanTCP {
 			wg.Add(1)
@@ -174,7 +172,7 @@ func scanPorts(target string, ports []int, timeout time.Duration, scanTCP, scanU
 				defer wg.Done()
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
-				
+
 				open := isTCPPortOpen(target, p, timeout)
 				resultsMutex.Lock()
 				results = append(results, PortResult{
@@ -186,14 +184,14 @@ func scanPorts(target string, ports []int, timeout time.Duration, scanTCP, scanU
 				resultsMutex.Unlock()
 			}(port)
 		}
-		
+
 		if scanUDP {
 			wg.Add(1)
 			go func(p int) {
 				defer wg.Done()
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
-				
+
 				open := isUDPPortOpen(target, p, timeout)
 				resultsMutex.Lock()
 				results = append(results, PortResult{
@@ -206,22 +204,22 @@ func scanPorts(target string, ports []int, timeout time.Duration, scanTCP, scanU
 			}(port)
 		}
 	}
-	
+
 	wg.Wait()
-	
+
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Port != results[j].Port {
 			return results[i].Port < results[j].Port
 		}
 		return results[i].Protocol < results[j].Protocol
 	})
-	
+
 	return results
 }
 
 func isTCPPortOpen(host string, port int, timeout time.Duration) bool {
 	address := fmt.Sprintf("%s:%d", host, port)
-	
+
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return false
@@ -232,23 +230,23 @@ func isTCPPortOpen(host string, port int, timeout time.Duration) bool {
 
 func isUDPPortOpen(host string, port int, timeout time.Duration) bool {
 	address := fmt.Sprintf("%s:%d", host, port)
-	
+
 	udpAddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
 		return false
 	}
-	
+
 	conn, err := net.DialTimeout("udp", udpAddr.String(), timeout)
 	if err != nil {
 		return false
 	}
 	defer conn.Close()
-	
+
 	readTimeout := time.NewTimer(timeout)
 	defer readTimeout.Stop()
-	
+
 	buffer := make([]byte, 1024)
-	
+
 	done := make(chan bool, 1)
 	go func() {
 		conn.SetReadDeadline(time.Now().Add(timeout))
@@ -259,7 +257,7 @@ func isUDPPortOpen(host string, port int, timeout time.Duration) bool {
 			done <- true
 		}
 	}()
-	
+
 	select {
 	case result := <-done:
 		return result
@@ -292,7 +290,7 @@ func getServiceName(port int, protocol string) string {
 			5353:  "mDNS",
 			11211: "Memcached",
 		}
-		
+
 		if service, ok := udpServices[port]; ok {
 			return service
 		}
@@ -318,7 +316,7 @@ func getServiceName(port int, protocol string) string {
 			8443:  "HTTPS-Alt",
 			27017: "MongoDB",
 		}
-		
+
 		if service, ok := tcpServices[port]; ok {
 			return service
 		}
@@ -329,7 +327,7 @@ func getServiceName(port int, protocol string) string {
 func sendScanResults(ctx *zero.Ctx, target string, results []PortResult) {
 	var openPorts []PortResult
 	var closedPorts []PortResult
-	
+
 	for _, result := range results {
 		if result.Open {
 			openPorts = append(openPorts, result)
@@ -337,16 +335,16 @@ func sendScanResults(ctx *zero.Ctx, target string, results []PortResult) {
 			closedPorts = append(closedPorts, result)
 		}
 	}
-	
+
 	var sb strings.Builder
 	sb.WriteString("=== 端口扫描结果: ")
 	sb.WriteString(target)
 	sb.WriteString(" ===\n\n")
-	
+
 	sb.WriteString(fmt.Sprintf("扫描端口: %d\n", len(results)))
 	sb.WriteString(fmt.Sprintf("开放端口: %d\n", len(openPorts)))
 	sb.WriteString(fmt.Sprintf("关闭端口: %d\n", len(closedPorts)))
-	
+
 	if len(openPorts) > 0 {
 		sb.WriteString("\n开放端口:\n")
 		for _, port := range openPorts {
@@ -355,7 +353,7 @@ func sendScanResults(ctx *zero.Ctx, target string, results []PortResult) {
 	} else {
 		sb.WriteString("\n未发现开放端口\n")
 	}
-	
+
 	if len(closedPorts) > 0 && len(closedPorts) <= 20 {
 		sb.WriteString("\n关闭端口:\n")
 		for _, port := range closedPorts {
@@ -364,14 +362,14 @@ func sendScanResults(ctx *zero.Ctx, target string, results []PortResult) {
 	} else if len(closedPorts) > 20 {
 		sb.WriteString(fmt.Sprintf("\n其他 %d 个端口已关闭\n", len(closedPorts)))
 	}
-	
+
 	sb.WriteString("注意: UDP端口扫描结果可能存在误报，因为某些服务可能不响应通用探测数据包\n")
 	sb.WriteString("=====================")
-	
+
 	result := sb.String()
 	if len(result) > 4000 {
 		result = result[:4000] + "\n... (输出过长，已截断)"
 	}
-	
+
 	ctx.SendChain(message.Text(result))
 }
