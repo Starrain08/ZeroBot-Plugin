@@ -61,11 +61,17 @@ const (
 		"- 取消精华 [信息ID]\n" +
 		"- /精华列表\n" +
 		"Tips: {at}可在发送时艾特被欢迎者 {nickname}是被欢迎者名字 {avatar}是被欢迎者头像 {uid}是被欢迎者QQ号 {gid}是当前群群号 {groupname} 是当前群群名"
+
+	maxCardLength    = 60
+	maxTitleLength   = 18
+	verifyTimeout    = 60
+	maxBanMinutes    = 43199
+	banMultiplierDay = 60 * 24
 )
 
 var (
 	db    sql.Sqlite
-	clock timer.Clock
+	clock *timer.Clock
 )
 
 func init() { // 插件主体
@@ -76,65 +82,28 @@ func init() { // 插件主体
 		PrivateDataFolder: "manager",
 	})
 
-	go func() {
-		db = sql.New(engine.DataFolder() + "config.db")
-		err := db.Open(time.Hour)
-		if err != nil {
-			panic(err)
-		}
-		clock = timer.NewClock(&db)
-		err = db.Create("welcome", &welcome{})
-		if err != nil {
-			panic(err)
-		}
-		err = db.Create("member", &member{})
-		if err != nil {
-			panic(err)
-		}
-		err = db.Create("farewell", &welcome{})
-		if err != nil {
-			panic(err)
-		}
-	}()
+	initializeDB(engine.DataFolder())
 
 	// 升为管理
 	engine.OnRegex(`^升为管理.*?(\d+)`, zero.OnlyGroup, zero.SuperUserPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			ctx.SetThisGroupAdmin(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被升为管理的人的qq
-				true,
-			)
-			nickname := ctx.GetThisGroupMemberInfo( // 被升为管理的人的昵称
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被升为管理的人的qq
-				false,
-			).Get("nickname").Str
-			ctx.SendChain(message.Text(nickname + " 升为了管理~"))
+			qq := math.Str2Int64(ctx.State["regex_matched"].([]string)[1])
+			ctx.SetThisGroupAdmin(qq, true)
+			ctx.SendChain(message.Text(getNickname(ctx, qq) + " 升为了管理~"))
 		})
 	// 取消管理
 	engine.OnRegex(`^取消管理.*?(\d+)`, zero.OnlyGroup, zero.SuperUserPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			ctx.SetThisGroupAdmin(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被取消管理的人的qq
-				false,
-			)
-			nickname := ctx.GetThisGroupMemberInfo( // 被取消管理的人的昵称
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被取消管理的人的qq
-				false,
-			).Get("nickname").Str
-			ctx.SendChain(message.Text("残念~ " + nickname + " 暂时失去了管理员的资格"))
+			qq := math.Str2Int64(ctx.State["regex_matched"].([]string)[1])
+			ctx.SetThisGroupAdmin(qq, false)
+			ctx.SendChain(message.Text("残念~ " + getNickname(ctx, qq) + " 暂时失去了管理员的资格"))
 		})
 	// 踢出群聊
 	engine.OnRegex(`^踢出群聊.*?(\d+)`, zero.OnlyGroup, zero.AdminPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			ctx.SetThisGroupKick(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被踢出群聊的人的qq
-				false,
-			)
-			nickname := ctx.GetThisGroupMemberInfo( // 被踢出群聊的人的昵称
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被踢出群聊的人的qq
-				false,
-			).Get("nickname").Str
-			ctx.SendChain(message.Text("残念~ " + nickname + " 被放逐"))
+			qq := math.Str2Int64(ctx.State["regex_matched"].([]string)[1])
+			ctx.SetThisGroupKick(qq, false)
+			ctx.SendChain(message.Text("残念~ " + getNickname(ctx, qq) + " 被放逐"))
 		})
 	// 退出群聊
 	engine.OnRegex(`^退出群聊.*?(\d+)`, zero.OnlyToMe, zero.SuperUserPermission).SetBlock(true).
@@ -161,19 +130,7 @@ func init() { // 插件主体
 		Handle(func(ctx *zero.Ctx) {
 			parsed := ctx.State[zero.KeyPattern].([]zero.PatternParsed)
 			duration := math.Str2Int64(parsed[2].Text()[1])
-			switch parsed[2].Text()[2] {
-			case "分钟":
-				//
-			case "小时":
-				duration *= 60
-			case "天":
-				duration *= 60 * 24
-			default:
-				//
-			}
-			if duration >= 43200 {
-				duration = 43199 // qq禁言最大时长为一个月
-			}
+			duration = parseDurationMinutes(duration, parsed[2].Text()[2])
 			ctx.SetThisGroupBan(
 				math.Str2Int64(parsed[1].At()), // 要禁言的人的qq
 				duration*60,                    // 要禁言的时间（分钟）
@@ -193,19 +150,7 @@ func init() { // 插件主体
 	engine.OnRegex(`^(我要自闭|禅定).*?(\d+)(.*)`, zero.OnlyGroup).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
 			duration := math.Str2Int64(ctx.State["regex_matched"].([]string)[2])
-			switch ctx.State["regex_matched"].([]string)[3] {
-			case "分钟", "min", "mins", "m":
-				break
-			case "小时", "hour", "hours", "h":
-				duration *= 60
-			case "天", "day", "days", "d":
-				duration *= 60 * 24
-			default:
-				break
-			}
-			if duration >= 43200 {
-				duration = 43199 // qq禁言最大时长为一个月
-			}
+			duration = parseDurationMinutes(duration, ctx.State["regex_matched"].([]string)[3])
 			ctx.SetThisGroupBan(
 				ctx.Event.UserID,
 				duration*60, // 要自闭的时间（分钟）
@@ -215,48 +160,48 @@ func init() { // 插件主体
 	// 修改名片
 	engine.OnRegex(`^修改名片.*?(\d+).+?\s*(.*)$`, zero.OnlyGroup, zero.AdminPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			if len(ctx.State["regex_matched"].([]string)[2]) > 60 {
+			card := ctx.State["regex_matched"].([]string)[2]
+			if len(card) > maxCardLength {
 				ctx.SendChain(message.Text("名字太长啦！"))
 				return
 			}
 			ctx.SetThisGroupCard(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被修改群名片的人
-				ctx.State["regex_matched"].([]string)[2],                 // 修改成的群名片
+				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]),
+				card,
 			)
 			ctx.SendChain(message.Text("嗯！已经修改了"))
 		})
 	// 修改头衔
 	engine.OnRegex(`^修改头衔.*?(\d+).+?\s*(.*)$`, zero.OnlyGroup, zero.AdminPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			sptitle := ctx.State["regex_matched"].([]string)[2]
-			if sptitle == "" {
+			title := ctx.State["regex_matched"].([]string)[2]
+			if title == "" {
 				ctx.SendChain(message.Text("头衔不能为空！"))
 				return
-			} else if len(sptitle) > 18 {
+			}
+			if len(title) > maxTitleLength {
 				ctx.SendChain(message.Text("头衔太长啦！"))
 				return
 			}
 			ctx.SetThisGroupSpecialTitle(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 被修改群头衔的人
-				sptitle, // 修改成的群头衔
+				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]),
+				title,
 			)
 			ctx.SendChain(message.Text("嗯！已经修改了"))
 		})
 	// 申请头衔
 	engine.OnRegex(`^申请头衔\s*(.*)$`, zero.OnlyGroup).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			sptitle := ctx.State["regex_matched"].([]string)[1]
-			if sptitle == "" {
+			title := ctx.State["regex_matched"].([]string)[1]
+			if title == "" {
 				ctx.SendChain(message.Text("头衔不能为空！"))
 				return
-			} else if len(sptitle) > 18 {
+			}
+			if len(title) > maxTitleLength {
 				ctx.SendChain(message.Text("头衔太长啦！"))
 				return
 			}
-			ctx.SetThisGroupSpecialTitle(
-				ctx.Event.UserID, // 被修改群头衔的人
-				sptitle,          // 修改成的群头衔
-			)
+			ctx.SetThisGroupSpecialTitle(ctx.Event.UserID, title)
 			ctx.SendChain(message.Text("嗯！不错的头衔呢~"))
 		})
 	// 撤回
@@ -270,28 +215,24 @@ func init() { // 插件主体
 	// 群聊转发
 	engine.OnRegex(`^群聊转发.*?(\d+)\s(.*)`, zero.SuperUserPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			// 对CQ码进行反转义
-			content := ctx.State["regex_matched"].([]string)[2]
-			content = strings.ReplaceAll(content, "&#91;", "[")
-			content = strings.ReplaceAll(content, "&#93;", "]")
+			target := ctx.State["regex_matched"].([]string)[1]
+			content := unescapeCQCode(ctx.State["regex_matched"].([]string)[2])
 			ctx.SendGroupMessage(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 需要发送的群
-				content, // 需要发送的信息
+				math.Str2Int64(target),
+				content,
 			)
-			ctx.SendChain(message.Text("📧 --> " + ctx.State["regex_matched"].([]string)[1]))
+			ctx.SendChain(message.Text("📧 --> " + target))
 		})
 	// 私聊转发
 	engine.OnRegex(`^私聊转发.*?(\d+)\s(.*)`, zero.SuperUserPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {
-			// 对CQ码进行反转义
-			content := ctx.State["regex_matched"].([]string)[2]
-			content = strings.ReplaceAll(content, "&#91;", "[")
-			content = strings.ReplaceAll(content, "&#93;", "]")
+			target := ctx.State["regex_matched"].([]string)[1]
+			content := unescapeCQCode(ctx.State["regex_matched"].([]string)[2])
 			ctx.SendPrivateMessage(
-				math.Str2Int64(ctx.State["regex_matched"].([]string)[1]), // 需要发送的人的qq
-				content, // 需要发送的信息
+				math.Str2Int64(target),
+				content,
 			)
-			ctx.SendChain(message.Text("📧 --> " + ctx.State["regex_matched"].([]string)[1]))
+			ctx.SendChain(message.Text("📧 --> " + target))
 		})
 	// 定时提醒
 	engine.OnRegex(`^在(.{1,2})月(.{1,3}日|每?周.?)的(.{1,3})点(.{1,3})分时(用.+)?提醒大家(.*)`, zero.AdminPermission, zero.OnlyGroup).SetBlock(true).
@@ -464,8 +405,7 @@ func init() { // 插件主体
 						a := rand.Intn(100)
 						b := rand.Intn(100)
 						r := a + b
-						ctx.SendChain(message.At(uid), message.Text(fmt.Sprintf("考你一道题：%d+%d=?\n如果60秒之内答不上来，%s就要把你踢出去了哦~", a, b, zero.BotConfig.NickName[0])))
-						// 匹配发送者进行验证
+						ctx.SendChain(message.At(uid), message.Text(fmt.Sprintf("考你一道题：%d+%d=?\n如果%d秒之内答不上来，%s就要把你踢出去了哦~", a, b, verifyTimeout, zero.BotConfig.NickName[0])))
 						rule := func(ctx *zero.Ctx) bool {
 							for _, elem := range ctx.Event.Message {
 								if elem.Type == "text" {
@@ -485,7 +425,7 @@ func init() { // 插件主体
 						next := zero.NewFutureEvent("message", 999, false, ctx.CheckSession(), rule)
 						recv, cancel := next.Repeat()
 						select {
-						case <-time.After(time.Minute):
+						case <-time.After(time.Duration(verifyTimeout) * time.Second):
 							cancel()
 							ctx.SendChain(message.Text("拜拜啦~"))
 							ctx.SetThisGroupKick(uid, false)
@@ -726,4 +666,48 @@ func welcometocq(ctx *zero.Ctx, welcome string) string {
 	cqstring = strings.ReplaceAll(cqstring, "{gid}", gid)
 	cqstring = strings.ReplaceAll(cqstring, "{groupname}", groupname)
 	return cqstring
+}
+
+func initializeDB(dataFolder string) {
+	db = sql.New(dataFolder + "config.db")
+	err := db.Open(time.Hour)
+	if err != nil {
+		panic(err)
+	}
+	clock = timer.NewClock(&db)
+	err = db.Create("welcome", &welcome{})
+	if err != nil {
+		panic(err)
+	}
+	err = db.Create("member", &member{})
+	if err != nil {
+		panic(err)
+	}
+	err = db.Create("farewell", &welcome{})
+	if err != nil {
+		panic(err)
+	}
+}
+
+func getNickname(ctx *zero.Ctx, qq int64) string {
+	return ctx.GetThisGroupMemberInfo(qq, false).Get("nickname").Str
+}
+
+func parseDurationMinutes(minutes int64, unit string) int64 {
+	switch unit {
+	case "小时", "hour", "hours", "h":
+		minutes *= 60
+	case "天", "day", "days", "d":
+		minutes *= banMultiplierDay
+	}
+	if minutes >= 43200 {
+		minutes = maxBanMinutes
+	}
+	return minutes
+}
+
+func unescapeCQCode(s string) string {
+	s = strings.ReplaceAll(s, "&#91;", "[")
+	s = strings.ReplaceAll(s, "&#93;", "]")
+	return s
 }

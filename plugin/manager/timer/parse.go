@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 	"unicode"
 
@@ -41,84 +40,106 @@ func GetFilledCronTimer(croncmd string, alert string, img string, botqq, gid int
 
 // GetFilledTimer 获得填充好的ts
 func GetFilledTimer(dateStrs []string, botqq, grp int64, matchDateOnly bool) *Timer {
+	var t Timer
+	var err error
+
 	monthStr := []rune(dateStrs[1])
 	dayWeekStr := []rune(dateStrs[2])
 	hourStr := []rune(dateStrs[3])
 	minuteStr := []rune(dateStrs[4])
 
-	var t Timer
 	mon := time.Month(chineseNum2Int(monthStr))
-	if (mon != -1 && mon <= 0) || mon > 12 { // 月份非法
-		t.Alert = "月份非法！"
+	if err = validateMonth(mon); err != nil {
+		t.Alert = err.Error()
 		return &t
 	}
 	t.SetMonth(mon)
-	lenOfDW := len(dayWeekStr)
-	switch {
-	case lenOfDW == 4: // 包括末尾的"日"
-		dayWeekStr = []rune{dayWeekStr[0], dayWeekStr[2]} // 去除中间的十
-		d := chineseNum2Int(dayWeekStr)
-		if (d != -1 && d <= 0) || d > 31 { // 日期非法
-			t.Alert = "日期非法1！"
-			return &t
-		}
-		t.SetDay(d)
-	case dayWeekStr[lenOfDW-1] == rune('日'): // xx日
-		dayWeekStr = dayWeekStr[:lenOfDW-1]
-		d := chineseNum2Int(dayWeekStr)
-		if (d != -1 && d <= 0) || d > 31 { // 日期非法
-			t.Alert = "日期非法2！"
-			return &t
-		}
-		t.SetDay(d)
-	case dayWeekStr[0] == rune('每'): // 每周
-		t.SetWeek(-1)
-	default: // 周x
-		w := chineseNum2Int(dayWeekStr[1:])
-		if w == 7 { // 周天是0
-			w = 0
-		}
-		if w < 0 || w > 6 { // 星期非法
-			t.Alert = "星期非法！"
-			return &t
-		}
-		t.SetWeek(time.Weekday(w))
+
+	if err = parseDayOrWeek(dayWeekStr, &t); err != nil {
+		t.Alert = err.Error()
+		return &t
 	}
+
 	if len(hourStr) == 3 {
-		hourStr = []rune{hourStr[0], hourStr[2]} // 去除中间的十
+		hourStr = []rune{hourStr[0], hourStr[2]}
 	}
 	h := chineseNum2Int(hourStr)
-	if h < -1 || h > 23 { // 小时非法
-		t.Alert = "小时非法！"
+	if err = validateHour(h); err != nil {
+		t.Alert = err.Error()
 		return &t
 	}
 	t.SetHour(h)
+
 	if len(minuteStr) == 3 {
-		minuteStr = []rune{minuteStr[0], minuteStr[2]} // 去除中间的十
+		minuteStr = []rune{minuteStr[0], minuteStr[2]}
 	}
 	minute := chineseNum2Int(minuteStr)
-	if minute < -1 || minute > 59 { // 分钟非法
-		t.Alert = "分钟非法！"
+	if err = validateMinute(minute); err != nil {
+		t.Alert = err.Error()
 		return &t
 	}
 	t.SetMinute(minute)
+
 	if !matchDateOnly {
-		urlStr := dateStrs[5]
-		if urlStr != "" { // 是图片url
-			t.URL = urlStr[3:] // utf-8下用为3字节
-			logrus.Debugln("[群管]" + t.URL)
-			if !strings.HasPrefix(t.URL, "http") {
-				t.URL = "illegal"
-				logrus.Debugln("[群管]url非法！")
-				return &t
-			}
+		if err = parseAdditionalFields(dateStrs, &t); err != nil {
+			t.Alert = err.Error()
+			return &t
 		}
-		t.Alert = dateStrs[6]
 		t.SetEn(true)
 	}
+
 	t.SelfID = botqq
 	t.GrpID = grp
 	return &t
+}
+
+func parseDayOrWeek(dayWeekStr []rune, t *Timer) error {
+	lenOfDW := len(dayWeekStr)
+
+	switch {
+	case lenOfDW == 4:
+		dayWeekStr = []rune{dayWeekStr[0], dayWeekStr[2]}
+		d := chineseNum2Int(dayWeekStr)
+		if err := validateDay(d); err != nil {
+			return err
+		}
+		t.SetDay(d)
+	case dayWeekStr[lenOfDW-1] == rune('日'):
+		dayWeekStr = dayWeekStr[:lenOfDW-1]
+		d := chineseNum2Int(dayWeekStr)
+		if err := validateDay(d); err != nil {
+			return err
+		}
+		t.SetDay(d)
+	case dayWeekStr[0] == rune('每'):
+		t.SetWeek(-1)
+	default:
+		w := chineseNum2Int(dayWeekStr[1:])
+		if w == 7 {
+			w = 0
+		}
+		if err := validateWeek(time.Weekday(w)); err != nil {
+			return err
+		}
+		t.SetWeek(time.Weekday(w))
+	}
+	return nil
+}
+
+func parseAdditionalFields(dateStrs []string, t *Timer) error {
+	urlStr := dateStrs[5]
+	if urlStr != "" {
+		if len(urlStr) < 4 {
+			return fmt.Errorf("url格式错误")
+		}
+		t.URL = urlStr[4:]
+		logrus.Debugln("[群管]" + t.URL)
+		if !validateURL(t.URL) {
+			return fmt.Errorf("url非法")
+		}
+	}
+	t.Alert = dateStrs[6]
+	return nil
 }
 
 // chineseNum2Int 汉字数字转int，仅支持-10～99，最多两位数，其中"每"解释为-1，"每二"为-2，以此类推
