@@ -15,9 +15,9 @@ import (
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
 	"github.com/FloatTech/zbputils/ctxext"
+	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -86,57 +86,65 @@ func getDefaultWindowsBlacklist() []dangerousCommand {
 }
 
 func loadCustomBlacklist(folder string) error {
+	if err := os.MkdirAll(folder, 0755); err != nil {
+		logrus.Errorf("[remoteterminal] 创建数据文件夹失败: %v", err)
+		return err
+	}
+
 	filePath := filepath.Join(folder, blacklistFile)
-	
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			logrus.Infoln("[remoteterminal] 未找到自定义黑名单文件，使用默认黑名单")
+			if err := createBlacklistTemplate(filePath); err != nil {
+				logrus.Warnf("[remoteterminal] 创建黑名单模板文件失败: %v", err)
+			}
 			return nil
 		}
 		return err
 	}
 	defer file.Close()
-	
+
 	logrus.Infoln("[remoteterminal] 加载自定义黑名单:", filePath)
-	
+
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
-	
+
 	for scanner.Scan() {
 		lineNum++
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		parts := strings.SplitN(line, "|", 2)
 		if len(parts) < 2 {
 			logrus.Warnf("[remoteterminal] 黑名单第 %d 行格式错误，跳过: %s", lineNum, line)
 			continue
 		}
-		
+
 		pattern := strings.TrimSpace(parts[0])
 		reason := strings.TrimSpace(parts[1])
-		
+
 		if pattern == "" || reason == "" {
 			logrus.Warnf("[remoteterminal] 黑名单第 %d 行格式错误，跳过: %s", lineNum, line)
 			continue
 		}
-		
+
 		dangerousCommands = append(dangerousCommands, dangerousCommand{
 			pattern: pattern,
 			reason:  reason,
 		})
-		
+
 		logrus.Debugf("[remoteterminal] 添加自定义黑名单: %s -> %s", pattern, reason)
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	
+
 	logrus.Infof("[remoteterminal] 已加载 %d 条自定义黑名单规则", len(dangerousCommands)-len(getDefaultBlacklist()))
 	return nil
 }
@@ -148,13 +156,26 @@ func getDefaultBlacklist() []dangerousCommand {
 	return getDefaultLinuxBlacklist()
 }
 
+func createBlacklistTemplate(filePath string) error {
+	content := `# 远程终端危险命令黑名单配置文件
+# 格式: 正则表达式|原因说明
+# 每行一条规则，以 # 开头的行为注释
+#
+# 示例:
+# ^rm\s+-rf|删除文件命令
+# ^shutdown|关机命令
+# ^format\s+[a-z]:|格式化磁盘
+`
+	return os.WriteFile(filePath, []byte(content), 0644)
+}
+
 func init() {
 	isWindows = runtime.GOOS == "windows"
-	
+
 	engine := control.AutoRegister(&ctrl.Options[*zero.Ctx]{
 		DisableOnDefault: false,
 		Brief:            "远程终端管理",
-		Help:             "远程终端管理\n" +
+		Help: "远程终端管理\n" +
 			"- /terminal exec <命令> - 执行命令\n" +
 			"- /terminal cd <路径> - 切换工作目录\n" +
 			"- /terminal pwd - 显示当前目录\n" +
@@ -166,9 +187,9 @@ func init() {
 	}).ApplySingle(ctxext.DefaultSingle)
 
 	dataFolder = engine.DataFolder()
-	
+
 	dangerousCommands = getDefaultBlacklist()
-	
+
 	go func() {
 		if err := loadCustomBlacklist(dataFolder); err != nil {
 			logrus.Errorf("[remoteterminal] 加载自定义黑名单失败: %v", err)
@@ -182,7 +203,7 @@ func init() {
 		Handle(func(ctx *zero.Ctx) {
 			args := ctx.State["args"].(string)
 			parts := strings.Fields(args)
-			
+
 			if len(parts) == 0 {
 				ctx.SendChain(message.Text(getHelp()))
 				return
@@ -203,7 +224,7 @@ func init() {
 				} else {
 					sendOutput(ctx, output)
 				}
-			
+
 			case "cd":
 				if len(parts) < 2 {
 					ctx.SendChain(message.Text("错误: 请指定目标目录"))
@@ -217,7 +238,7 @@ func init() {
 					currentDir = newDir
 					ctx.SendChain(message.Text("当前目录: ", currentDir))
 				}
-			
+
 			case "pwd":
 				output, err := executeCommand("pwd", currentDir, 5*time.Second)
 				if err != nil {
@@ -225,7 +246,7 @@ func init() {
 				} else {
 					ctx.SendChain(message.Text(strings.TrimSpace(output)))
 				}
-			
+
 			case "ls":
 				output, err := executeCommand("ls -la", currentDir, 10*time.Second)
 				if err != nil {
@@ -233,7 +254,7 @@ func init() {
 				} else {
 					sendOutput(ctx, output)
 				}
-			
+
 			case "timeout":
 				if len(parts) < 2 {
 					ctx.SendChain(message.Text("当前超时设置: ", cmdTimeout, " 秒\n使用 /terminal timeout <秒> 设置超时时间"))
@@ -247,7 +268,7 @@ func init() {
 				}
 				cmdTimeout = timeout
 				ctx.SendChain(message.Text("命令超时已设置为 ", cmdTimeout, " 秒"))
-			
+
 			case "reload":
 				dangerousCommands = getDefaultBlacklist()
 				if err := loadCustomBlacklist(dataFolder); err != nil {
@@ -255,13 +276,13 @@ func init() {
 				} else {
 					ctx.SendChain(message.Text("黑名单已重新加载，当前共 ", len(dangerousCommands), " 条规则"))
 				}
-			
+
 			case "list_blacklist":
 				listBlacklist(ctx)
-			
+
 			case "help":
 				ctx.SendChain(message.Text(getHelp()))
-			
+
 			default:
 				ctx.SendChain(message.Text("未知命令: ", cmd, "\n使用 /terminal help 查看帮助"))
 			}
@@ -270,22 +291,22 @@ func init() {
 
 func listBlacklist(ctx *zero.Ctx) {
 	var sb strings.Builder
-	
+
 	if isWindows {
 		sb.WriteString("=== Windows 危险命令黑名单 ===\n\n")
 	} else {
 		sb.WriteString("=== Linux 危险命令黑名单 ===\n\n")
 	}
-	
+
 	sb.WriteString(fmt.Sprintf("当前操作系统: %s\n", runtime.GOOS))
 	sb.WriteString(fmt.Sprintf("黑名单规则总数: %d\n\n", len(dangerousCommands)))
-	
+
 	defaultCount := len(getDefaultBlacklist())
 	customCount := len(dangerousCommands) - defaultCount
-	
+
 	sb.WriteString(fmt.Sprintf("默认规则: %d 条\n", defaultCount))
 	sb.WriteString(fmt.Sprintf("自定义规则: %d 条\n\n", customCount))
-	
+
 	sb.WriteString("规则列表:\n")
 	for i, dc := range dangerousCommands {
 		if i >= 50 {
@@ -298,7 +319,7 @@ func listBlacklist(ctx *zero.Ctx) {
 		}
 		sb.WriteString(fmt.Sprintf("%d. %s%s -> %s\n", i+1, prefix, dc.pattern, dc.reason))
 	}
-	
+
 	sb.WriteString("\n=====================\n")
 	sb.WriteString("自定义黑名单配置文件:\n")
 	sb.WriteString(fmt.Sprintf("位置: %s\n", filepath.Join(dataFolder, blacklistFile)))
@@ -306,25 +327,25 @@ func listBlacklist(ctx *zero.Ctx) {
 	sb.WriteString("示例:\n")
 	sb.WriteString("^rm\\s+-rf|删除文件\n")
 	sb.WriteString("^shutdown|关机命令\n")
-	
+
 	result := sb.String()
 	if len(result) > 4000 {
 		result = result[:4000] + "\n... (内容过长，已截断)"
 	}
-	
+
 	ctx.SendChain(message.Text(result))
 }
 
 func isDangerousCommand(command string) (bool, string) {
 	trimmedCmd := strings.TrimSpace(command)
-	
+
 	for _, dc := range dangerousCommands {
 		matched, _ := regexp.MatchString(dc.pattern, trimmedCmd)
 		if matched {
 			return true, dc.reason
 		}
 	}
-	
+
 	return false, ""
 }
 
@@ -332,29 +353,31 @@ func executeCommand(command, dir string, timeout time.Duration) (string, error) 
 	if dangerous, reason := isDangerousCommand(command); dangerous {
 		return "", fmt.Errorf("危险命令被拦截: %s (原因: %s)", command, reason)
 	}
-	
+
 	logrus.Infoln("[remoteterminal] 执行命令:", command, "在目录:", dir)
-	
+
 	var cmd *exec.Cmd
 	if isWindows {
-		cmd = exec.Command("cmd", "/c", command)
+		cmd = exec.Command("cmd", "/c", "chcp 65001 >nul 2>&1 && "+command)
+		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	} else {
 		cmd = exec.Command("sh", "-c", command)
+		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	}
-	
+
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- cmd.Run()
 	}()
-	
+
 	select {
 	case err := <-errChan:
 		if err != nil {
@@ -377,7 +400,7 @@ func executeCommand(command, dir string, timeout time.Duration) (string, error) 
 
 func changeDirectory(path, currentDir string) (string, error) {
 	var newDir string
-	
+
 	if isWindows {
 		if len(path) >= 2 && strings.ToUpper(path[0:2]) == ":" {
 			newDir = path
@@ -395,22 +418,32 @@ func changeDirectory(path, currentDir string) (string, error) {
 			} else {
 				newDir = currentDir + path
 			}
+
+			cmd := exec.Command("cmd", "/c", "chcp 65001 >nul 2>&1 && cd /d "+newDir+" && cd")
+			cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
+			var stdout bytes.Buffer
+			cmd.Stdout = &stdout
+
+			err := cmd.Run()
+			if err != nil {
+				return "", err
+			}
 		}
-		
+
 		cmd := exec.Command("cmd", "/c", "cd /d "+newDir+" && cd")
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
-		
+
 		err := cmd.Run()
 		if err != nil {
 			return "", err
 		}
-		
+
 		result := strings.TrimSpace(stdout.String())
 		if result == "" {
 			return "", fmt.Errorf("无法访问目录: %s", newDir)
 		}
-		
+
 		return result, nil
 	} else {
 		if strings.HasPrefix(path, "/") {
@@ -420,28 +453,28 @@ func changeDirectory(path, currentDir string) (string, error) {
 		} else {
 			newDir = currentDir + "/" + path
 		}
-		
+
 		cmd := exec.Command("sh", "-c", "cd "+newDir+" && pwd")
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
-		
+
 		err := cmd.Run()
 		if err != nil {
 			return "", err
 		}
-		
+
 		result := strings.TrimSpace(stdout.String())
 		if result == "" {
 			return "", fmt.Errorf("无法访问目录: %s", newDir)
 		}
-		
+
 		return result, nil
 	}
 }
 
 func sendOutput(ctx *zero.Ctx, output string) {
 	lines := strings.Split(output, "\n")
-	
+
 	if len(lines) <= maxOutputLines {
 		result := strings.Join(lines, "\n")
 		if len(result) > 4000 {
@@ -450,16 +483,16 @@ func sendOutput(ctx *zero.Ctx, output string) {
 		ctx.SendChain(message.Text(result))
 		return
 	}
-	
+
 	truncated := make([]string, maxOutputLines+1)
 	truncated[0] = fmt.Sprintf("输出共 %d 行，显示前 %d 行:", len(lines), maxOutputLines)
 	copy(truncated[1:], lines[:maxOutputLines])
-	
+
 	result := strings.Join(truncated, "\n")
 	if len(result) > 4000 {
 		result = result[:4000] + "\n... (输出过长，已截断)"
 	}
-	
+
 	ctx.SendChain(message.Text(result))
 }
 

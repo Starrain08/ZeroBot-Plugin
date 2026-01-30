@@ -3,6 +3,7 @@ package ping
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -73,11 +74,14 @@ func doPing(target string, count int, timeout int) (string, error) {
 
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("ping", "-n", strconv.Itoa(count), "-w", strconv.Itoa(timeout*1000), target)
+		cmd = exec.Command("cmd", "/c", "chcp 65001 >nul 2>&1 && ping", "-n", strconv.Itoa(count), "-w", strconv.Itoa(timeout*1000), target)
+		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	case "darwin", "freebsd", "netbsd":
 		cmd = exec.Command("ping", "-c", strconv.Itoa(count), "-W", strconv.Itoa(timeout), target)
+		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	default:
 		cmd = exec.Command("ping", "-c", strconv.Itoa(count), "-w", strconv.Itoa(timeout), target)
+		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	}
 
 	var stdout, stderr bytes.Buffer
