@@ -55,7 +55,7 @@ func init() {
 				return
 			}
 
-			input := ctx.State["args"].(string)
+			input := matches[0]
 			scanTCP := !strings.Contains(input, "-u") || strings.Contains(input, "-a")
 			scanUDP := strings.Contains(input, "-u") || strings.Contains(input, "-a")
 
