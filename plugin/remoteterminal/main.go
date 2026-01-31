@@ -172,7 +172,7 @@ func createBlacklistTemplate(filePath string) error {
 func init() {
 	isWindows = runtime.GOOS == "windows"
 
-	engine := control.AutoRegister(&ctrl.Options[*zero.Ctx]{
+	engine := control.Register("remoteterminal", &ctrl.Options[*zero.Ctx]{
 		DisableOnDefault: false,
 		Brief:            "远程终端管理",
 		Help: "远程终端管理\n" +
@@ -184,6 +184,7 @@ func init() {
 			"- /terminal reload - 重新加载黑名单配置\n" +
 			"- /terminal list_blacklist - 列出当前黑名单\n" +
 			"- /terminal help - 显示帮助",
+		PrivateDataFolder: "remoteterminal",
 	}).ApplySingle(ctxext.DefaultSingle)
 
 	dataFolder = engine.DataFolder()
@@ -199,8 +200,12 @@ func init() {
 	var currentDir string
 	cmdTimeout := defaultTimeout
 
-	engine.OnPrefix("/terminal", zero.SuperUserPermission).SetBlock(true).Limit(ctxext.LimitByUser).
+	engine.OnPrefix("/terminal").SetBlock(true).Limit(ctxext.LimitByUser).
 		Handle(func(ctx *zero.Ctx) {
+			if !zero.SuperUserPermission(ctx) {
+				ctx.SendChain(message.Reply(ctx.Event.MessageID), message.Text("❌ 权限不足\n此命令仅限超级管理员使用"))
+				return
+			}
 			args := ctx.State["args"].(string)
 			parts := strings.Fields(args)
 
