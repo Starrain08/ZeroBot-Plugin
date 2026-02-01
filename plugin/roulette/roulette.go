@@ -108,7 +108,8 @@ func init() { // 插件主体
 				return
 			}
 			ss.addUser(uid, dataPath)
-			ctx.SendChain(message.Text("成功加入,目前已有", ss.countUser()+1, "位玩家,发送\"开始轮盘赌\"进行游戏"))
+			ss = getSession(gid, dataPath)
+			ctx.SendChain(message.Text("成功加入,目前已有", ss.countUser(), "位玩家,发送\"开始轮盘赌\"进行游戏"))
 		})
 
 	// 开始轮盘赌
@@ -135,6 +136,7 @@ func init() { // 插件主体
 			ss.setValid(true, dataPath)
 			rule := "轮盘容量为6, 但只填充了一发子弹, 请参与游戏的双方轮流发送`开火`, 枪响结束后"
 			ss.rotateUser(dataPath)
+			ss = getSession(gid, dataPath)
 			ctx.SendChain(message.Text("游戏开始,", rule, "现在请"), message.At(ss.Users[0]), message.Text("开火"))
 
 			// 游戏进行
@@ -203,7 +205,8 @@ func init() { // 插件主体
 						getTruthOrDare(c)
 						return
 					}
-					ctx.SendChain(message.Text(aliveMsg[rand.Intn(len(aliveMsg))]), message.Text(",轮到"), message.At(s.Users[1]), message.Text("开火"))
+					s = getSession(gid, dataPath)
+					ctx.SendChain(message.Text(aliveMsg[rand.Intn(len(aliveMsg))]), message.Text(",轮到"), message.At(s.Users[0]), message.Text("开火"))
 				}
 			}
 		})
