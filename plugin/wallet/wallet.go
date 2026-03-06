@@ -2,6 +2,7 @@
 package wallet
 
 import (
+	"encoding/base64"
 	"math"
 	"os"
 	"regexp"
@@ -63,7 +64,13 @@ func init() {
 			today := time.Now().Format("20060102")
 			drawedFile := cachePath + gid + today + "walletRank.png"
 			if file.IsExist(drawedFile) {
-				ctx.SendChain(message.Image("file:///" + file.BOTPATH + "/" + drawedFile))
+				imgData, err := os.ReadFile(file.BOTPATH + "/" + drawedFile)
+				if err != nil {
+					ctx.SendChain(message.Text("ERROR: ", err))
+					return
+				}
+				base64Img := base64.StdEncoding.EncodeToString(imgData)
+				ctx.SendChain(message.Image("base64://" + base64Img))
 				return
 			}
 			// 无缓存获取群员列表
@@ -137,7 +144,13 @@ func init() {
 				ctx.SendChain(message.Text("ERROR: ", err))
 				return
 			}
-			ctx.SendChain(message.Image("file:///" + file.BOTPATH + "/" + drawedFile))
+			imgData, err := os.ReadFile(file.BOTPATH + "/" + drawedFile)
+			if err != nil {
+				ctx.SendChain(message.Text("ERROR: ", err))
+				return
+			}
+			base64Img := base64.StdEncoding.EncodeToString(imgData)
+			ctx.SendChain(message.Image("base64://" + base64Img))
 		})
 	en.OnPrefix("设置硬币名称", zero.OnlyToMe, zero.SuperUserPermission).SetBlock(true).
 		Handle(func(ctx *zero.Ctx) {

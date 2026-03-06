@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
@@ -18,6 +20,8 @@ import (
 	"github.com/sirupsen/logrus"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 const (
@@ -245,7 +249,13 @@ func init() {
 				}
 
 			case "pwd":
-				output, err := executeCommand("pwd", currentDir, 5*time.Second)
+				var cmd string
+				if isWindows {
+					cmd = "cd"
+				} else {
+					cmd = "pwd"
+				}
+				output, err := executeCommand(cmd, currentDir, 5*time.Second)
 				if err != nil {
 					ctx.SendChain(message.Text("获取当前目录失败: ", err.Error()))
 				} else {
@@ -253,7 +263,13 @@ func init() {
 				}
 
 			case "ls":
-				output, err := executeCommand("ls -la", currentDir, 10*time.Second)
+				var cmd string
+				if isWindows {
+					cmd = "dir"
+				} else {
+					cmd = "ls -la"
+				}
+				output, err := executeCommand(cmd, currentDir, 10*time.Second)
 				if err != nil {
 					ctx.SendChain(message.Text("列出文件失败: ", err.Error()))
 				} else {
@@ -354,20 +370,34 @@ func isDangerousCommand(command string) (bool, string) {
 	return false, ""
 }
 
+func gbkToUtf8(s string) string {
+	if isWindows {
+		if utf8.ValidString(s) {
+			return s
+		}
+		reader := transform.NewReader(strings.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+		result, err := io.ReadAll(reader)
+		if err != nil {
+			logrus.Warnf("[remoteterminal] GBK to UTF8 转换失败: %v", err)
+			return s
+		}
+		return string(result)
+	}
+	return s
+}
+
 func executeCommand(command, dir string, timeout time.Duration) (string, error) {
 	if dangerous, reason := isDangerousCommand(command); dangerous {
 		return "", fmt.Errorf("危险命令被拦截: %s (原因: %s)", command, reason)
 	}
 
-	logrus.Infoln("[remoteterminal] 执行命令:", command, "在目录:", dir)
+	logrus.Infoln("[remoteterminal] 执行命令:", command, "在目录:", dir, "操作系统:", runtime.GOOS)
 
 	var cmd *exec.Cmd
 	if isWindows {
-		cmd = exec.Command("cmd", "/c", "chcp 65001 >nul 2>&1 && "+command)
-		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
+		cmd = exec.Command("cmd", "/c", command)
 	} else {
 		cmd = exec.Command("sh", "-c", command)
-		cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
 	}
 
 	if dir != "" {
@@ -387,14 +417,17 @@ func executeCommand(command, dir string, timeout time.Duration) (string, error) 
 	case err := <-errChan:
 		if err != nil {
 			if stderr.Len() > 0 {
-				return stderr.String(), err
+				return fmt.Sprintf("%s\n执行错误: %v\n\nstderr输出:\n%s", gbkToUtf8(stdout.String()), err, gbkToUtf8(stderr.String())), err
+			}
+			if stdout.Len() > 0 {
+				return fmt.Sprintf("%s\n执行错误: %v", gbkToUtf8(stdout.String()), err), err
 			}
 			return "", err
 		}
 		if stderr.Len() > 0 {
-			return stdout.String() + "\n[stderr]\n" + stderr.String(), nil
+			return gbkToUtf8(stdout.String()) + "\n[stderr]\n" + gbkToUtf8(stderr.String()), nil
 		}
-		return stdout.String(), nil
+		return gbkToUtf8(stdout.String()), nil
 	case <-time.After(timeout):
 		if cmd.Process != nil {
 			cmd.Process.Kill()
@@ -423,28 +456,19 @@ func changeDirectory(path, currentDir string) (string, error) {
 			} else {
 				newDir = currentDir + path
 			}
-
-			cmd := exec.Command("cmd", "/c", "chcp 65001 >nul 2>&1 && cd /d "+newDir+" && cd")
-			cmd.Env = append(os.Environ(), "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
-			var stdout bytes.Buffer
-			cmd.Stdout = &stdout
-
-			err := cmd.Run()
-			if err != nil {
-				return "", err
-			}
 		}
 
 		cmd := exec.Command("cmd", "/c", "cd /d "+newDir+" && cd")
-		var stdout bytes.Buffer
+		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
 		err := cmd.Run()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("切换目录失败: %w\nstderr: %s", err, gbkToUtf8(stderr.String()))
 		}
 
-		result := strings.TrimSpace(stdout.String())
+		result := strings.TrimSpace(gbkToUtf8(stdout.String()))
 		if result == "" {
 			return "", fmt.Errorf("无法访问目录: %s", newDir)
 		}
@@ -460,12 +484,13 @@ func changeDirectory(path, currentDir string) (string, error) {
 		}
 
 		cmd := exec.Command("sh", "-c", "cd "+newDir+" && pwd")
-		var stdout bytes.Buffer
+		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
 		err := cmd.Run()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("切换目录失败: %w\nstderr: %s", err, stderr.String())
 		}
 
 		result := strings.TrimSpace(stdout.String())
@@ -508,7 +533,7 @@ func getHelp() string {
 可用命令:
 /terminal exec <命令>         - 执行 Windows 命令
 /terminal cd <路径>           - 切换工作目录
-/terminal pwd                 - 显示当前工作目录
+/terminal pwd                 - 显示当前工作目录 (使用 cd 命令)
 /terminal dir                 - 列出当前目录文件
 /terminal timeout <秒>        - 设置命令超时时间 (1-300秒，默认30秒)
 /terminal reload              - 重新加载黑名单配置
@@ -540,9 +565,11 @@ func getHelp() string {
 
 示例:
 /terminal exec dir
-/terminal exec ipconfig
+/terminal exec ipconfig /all
 /terminal exec tasklist
 /terminal exec netstat -an
+/terminal exec systeminfo
+/terminal exec whoami
 /terminal timeout 60
 `
 	} else {
