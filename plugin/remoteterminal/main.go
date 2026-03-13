@@ -370,20 +370,20 @@ func isDangerousCommand(command string) (bool, string) {
 	return false, ""
 }
 
-func gbkToUtf8(s string) string {
+func gbkToUtf8(data []byte) string {
 	if isWindows {
-		if utf8.ValidString(s) {
-			return s
+		if utf8.Valid(data) {
+			return string(data)
 		}
-		reader := transform.NewReader(strings.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+		reader := transform.NewReader(bytes.NewReader(data), simplifiedchinese.GBK.NewDecoder())
 		result, err := io.ReadAll(reader)
 		if err != nil {
 			logrus.Warnf("[remoteterminal] GBK to UTF8 转换失败: %v", err)
-			return s
+			return string(data)
 		}
 		return string(result)
 	}
-	return s
+	return string(data)
 }
 
 func executeCommand(command, dir string, timeout time.Duration) (string, error) {
@@ -404,6 +404,10 @@ func executeCommand(command, dir string, timeout time.Duration) (string, error) 
 		cmd.Dir = dir
 	}
 
+	if isWindows {
+		cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -417,17 +421,17 @@ func executeCommand(command, dir string, timeout time.Duration) (string, error) 
 	case err := <-errChan:
 		if err != nil {
 			if stderr.Len() > 0 {
-				return fmt.Sprintf("%s\n执行错误: %v\n\nstderr输出:\n%s", gbkToUtf8(stdout.String()), err, gbkToUtf8(stderr.String())), err
+				return fmt.Sprintf("%s\n执行错误: %v\n\nstderr输出:\n%s", gbkToUtf8(stdout.Bytes()), err, gbkToUtf8(stderr.Bytes())), err
 			}
 			if stdout.Len() > 0 {
-				return fmt.Sprintf("%s\n执行错误: %v", gbkToUtf8(stdout.String()), err), err
+				return fmt.Sprintf("%s\n执行错误: %v", gbkToUtf8(stdout.Bytes()), err), err
 			}
 			return "", err
 		}
 		if stderr.Len() > 0 {
-			return gbkToUtf8(stdout.String()) + "\n[stderr]\n" + gbkToUtf8(stderr.String()), nil
+			return gbkToUtf8(stdout.Bytes()) + "\n[stderr]\n" + gbkToUtf8(stderr.Bytes()), nil
 		}
-		return gbkToUtf8(stdout.String()), nil
+		return gbkToUtf8(stdout.Bytes()), nil
 	case <-time.After(timeout):
 		if cmd.Process != nil {
 			cmd.Process.Kill()
@@ -465,10 +469,10 @@ func changeDirectory(path, currentDir string) (string, error) {
 
 		err := cmd.Run()
 		if err != nil {
-			return "", fmt.Errorf("切换目录失败: %w\nstderr: %s", err, gbkToUtf8(stderr.String()))
+			return "", fmt.Errorf("切换目录失败: %w\nstderr: %s", err, gbkToUtf8(stderr.Bytes()))
 		}
 
-		result := strings.TrimSpace(gbkToUtf8(stdout.String()))
+		result := strings.TrimSpace(gbkToUtf8(stdout.Bytes()))
 		if result == "" {
 			return "", fmt.Errorf("无法访问目录: %s", newDir)
 		}
