@@ -4,6 +4,7 @@ package fortune
 import (
 	"archive/zip"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"image"
@@ -24,7 +25,6 @@ import (
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
 	"github.com/FloatTech/zbputils/ctxext"
-	"github.com/FloatTech/zbputils/img/pool"
 )
 
 const (
@@ -146,19 +146,28 @@ func init() {
 			digest := md5.Sum(helper.StringToBytes(zipfile + strconv.Itoa(index) + title + text))
 			cachefile := cache + hex.EncodeToString(digest[:])
 
-			err = pool.SendImageFromPool(cachefile, func(cachefile string) error {
+			if _, err := os.Stat(cachefile); os.IsNotExist(err) {
 				f, err := os.Create(cachefile)
 				if err != nil {
-					return err
+					ctx.SendChain(message.Text("ERROR: ", err))
+					return
 				}
 				_, err = draw(background, fontdata, title, text, f)
 				_ = f.Close()
-				return err
-			}, ctxext.Send(ctx))
+				if err != nil {
+					ctx.SendChain(message.Text("ERROR: ", err))
+					return
+				}
+			}
+
+			imgData, err := os.ReadFile(cachefile)
 			if err != nil {
 				ctx.SendChain(message.Text("ERROR: ", err))
 				return
 			}
+
+			base64Img := base64.StdEncoding.EncodeToString(imgData)
+			ctx.SendChain(message.Image("base64://" + base64Img))
 		})
 }
 
